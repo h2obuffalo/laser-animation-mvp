@@ -14,6 +14,7 @@ const elements = Object.fromEntries([
   "visibilityValue", "sensitivityInput", "sensitivityValue", "poseControls", "airDancerControls",
   "progressBar", "progressText", "videoMeta", "frameMeta", "laserCanvas",
 ].map((id) => [id, document.querySelector(`#${id}`)]));
+
 const context = elements.laserCanvas.getContext("2d");
 const analysisCanvas = document.createElement("canvas");
 const analysisContext = analysisCanvas.getContext("2d", { willReadFrequently: true });
@@ -24,6 +25,9 @@ const state = {
   processing: false,
   playbackHandle: null,
   playbackStartedAt: 0,
+  playbackStartFrame: 0,
+  playbackEndFrame: 0,
+  lastPlaybackFrame: null,
   processedFps: null,
   processedMode: null,
 };
@@ -53,6 +57,7 @@ function drawFrame(frame) {
   context.fillStyle = "#020406";
   context.fillRect(0, 0, VIEWBOX_SIZE, VIEWBOX_SIZE);
   if (!frame || !Array.isArray(frame.strokes)) return;
+
   context.strokeStyle = "#f3fff8";
   context.shadowColor = "#7dffb2";
   context.shadowBlur = 18;
@@ -69,17 +74,27 @@ function drawFrame(frame) {
   context.shadowBlur = 0;
 }
 
+function previewStartFrame() {
+  return state.frames[state.playbackStartFrame]
+    ?? state.frames.find((frame) => frame.strokes.length > 0)
+    ?? state.frames[0];
+}
+
 function stopPlayback({ resetPreview = false } = {}) {
   if (state.playbackHandle !== null) cancelAnimationFrame(state.playbackHandle);
   state.playbackHandle = null;
+  state.lastPlaybackFrame = null;
   elements.playButton.textContent = "Play result";
-  if (resetPreview && state.frames.length > 0) drawFrame(state.frames[0]);
+  if (resetPreview && state.frames.length > 0) drawFrame(previewStartFrame());
 }
 
 function resetOutput() {
   state.frames = [];
   state.processedFps = null;
   state.processedMode = null;
+  state.playbackStartFrame = 0;
+  state.playbackEndFrame = 0;
+  state.lastPlaybackFrame = null;
   stopPlayback();
   elements.playButton.disabled = true;
   elements.downloadButton.disabled = true;
@@ -119,16 +134,33 @@ function waitForEvent(target, eventName) {
   });
 }
 
+function waitForDecodedVideoFrame(video) {
+  return new Promise((resolve) => {
+    let complete = false;
+    const finish = () => {
+      if (complete) return;
+      complete = true;
+      clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = setTimeout(finish, 100);
+    if (typeof video.requestVideoFrameCallback === "function") {
+      video.requestVideoFrameCallback(finish);
+    } else {
+      requestAnimationFrame(() => requestAnimationFrame(finish));
+    }
+  });
+}
+
 async function seekVideo(timeSeconds) {
   const video = elements.sourceVideo;
   const clampedTime = Math.min(Math.max(timeSeconds, 0), video.duration);
-  if (Math.abs(video.currentTime - clampedTime) < 0.001) {
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    return;
+  if (Math.abs(video.currentTime - clampedTime) >= 0.001) {
+    const seeked = waitForEvent(video, "seeked");
+    video.currentTime = clampedTime;
+    await seeked;
   }
-  const seeked = waitForEvent(video, "seeked");
-  video.currentTime = clampedTime;
-  await seeked;
+  await waitForDecodedVideoFrame(video);
 }
 
 async function createPoseLandmarker(delegate) {
@@ -169,16 +201,22 @@ async function handleVideoSelection(event) {
   elements.sourceVideo.src = state.videoUrl;
   resetOutput();
   setProgress(0, "Loading video metadata...");
-  if (elements.sourceVideo.readyState < HTMLMediaElement.HAVE_METADATA) await waitForEvent(elements.sourceVideo, "loadedmetadata");
+  if (elements.sourceVideo.readyState < HTMLMediaElement.HAVE_METADATA) {
+    await waitForEvent(elements.sourceVideo, "loadedmetadata");
+  }
   const duration = elements.sourceVideo.duration;
   elements.videoMeta.textContent = `${duration.toFixed(1)} s | ${elements.sourceVideo.videoWidth} x ${elements.sourceVideo.videoHeight}`;
-  setProgress(0, duration > MAX_DURATION_SECONDS ? `This MVP processes the first ${MAX_DURATION_SECONDS} seconds.` : "Ready to process.");
+  setProgress(0, duration > MAX_DURATION_SECONDS
+    ? `This MVP processes the first ${MAX_DURATION_SECONDS} seconds.`
+    : "Ready to process.");
   updateModeControls();
 }
 
 function mappedPose(result, video) {
   const pose = result.landmarks?.[0];
-  return pose ? pose.map((landmark) => mapLandmarkToViewBox(landmark, video.videoWidth, video.videoHeight)) : null;
+  return pose
+    ? pose.map((landmark) => mapLandmarkToViewBox(landmark, video.videoWidth, video.videoHeight))
+    : null;
 }
 
 function airDancerPose(video) {
@@ -187,13 +225,29 @@ function airDancerPose(video) {
   analysisCanvas.height = Math.max(80, Math.round(AIR_DANCER_ANALYSIS_WIDTH / aspect));
   analysisContext.drawImage(video, 0, 0, analysisCanvas.width, analysisCanvas.height);
   const imageData = analysisContext.getImageData(0, 0, analysisCanvas.width, analysisCanvas.height);
-  return extractAirDancerLandmarks(imageData, { sensitivity: Number(elements.sensitivityInput.value) / 100 });
+  return extractAirDancerLandmarks(imageData, {
+    sensitivity: Number(elements.sensitivityInput.value) / 100,
+  });
+}
+
+function setPlaybackRange(frames) {
+  const first = frames.findIndex((frame) => frame.strokes.length > 0);
+  let last = -1;
+  for (let index = frames.length - 1; index >= 0; index -= 1) {
+    if (frames[index].strokes.length > 0) {
+      last = index;
+      break;
+    }
+  }
+  state.playbackStartFrame = first >= 0 ? first : 0;
+  state.playbackEndFrame = last >= 0 ? last : Math.max(0, frames.length - 1);
 }
 
 async function processVideo() {
   if (state.processing) return;
   const mode = elements.modeInput.value;
   if (mode === "person" && !state.poseLandmarker) return;
+
   const video = elements.sourceVideo;
   const fps = Number(elements.fpsInput.value);
   const smoothing = Number(elements.smoothingInput.value) / 100;
@@ -209,11 +263,13 @@ async function processVideo() {
   updateModeControls();
   elements.videoInput.disabled = true;
   elements.modeInput.disabled = true;
+
   try {
     video.pause();
     for (let index = 0; index < frameCount; index += 1) {
       const timeSeconds = index / fps;
       await seekVideo(timeSeconds);
+
       let currentLandmarks = null;
       if (mode === "person") {
         const result = state.poseLandmarker.detectForVideo(video, timeSeconds * 1000);
@@ -221,12 +277,16 @@ async function processVideo() {
       } else {
         currentLandmarks = airDancerPose(video);
       }
+
       let strokes = [];
       if (currentLandmarks) {
         const smoothed = smoothLandmarks(previousLandmarks, currentLandmarks, smoothing);
         previousLandmarks = smoothed;
-        strokes = mode === "person" ? landmarksToStrokes(smoothed, minimumVisibility) : airDancerLandmarksToStrokes(smoothed);
+        strokes = mode === "person"
+          ? landmarksToStrokes(smoothed, minimumVisibility)
+          : airDancerLandmarksToStrokes(smoothed);
       }
+
       frames.push({ index, timeSeconds, strokes, pointCount: countPoints(strokes) });
       if (index === 0 || index % 3 === 0 || index === frameCount - 1) {
         drawFrame(frames[index]);
@@ -234,16 +294,20 @@ async function processVideo() {
         await new Promise((resolve) => requestAnimationFrame(resolve));
       }
     }
+
     state.frames = frames;
     state.processedFps = fps;
     state.processedMode = mode;
+    setPlaybackRange(frames);
+
     const detectedFrames = frames.filter((frame) => frame.strokes.length > 0).length;
     const coverage = detectedFrames / frames.length;
     const maxPoints = Math.max(...frames.map((frame) => frame.pointCount));
     elements.frameMeta.textContent = `${detectedFrames}/${frames.length} usable frames | max ${maxPoints} points`;
     elements.playButton.disabled = detectedFrames === 0;
     elements.downloadButton.disabled = detectedFrames === 0;
-    drawFrame(frames.find((frame) => frame.strokes.length > 0) ?? frames[0]);
+    drawFrame(previewStartFrame());
+
     const quality = coverage >= 0.8 ? "strong" : coverage >= 0.4 ? "partial" : "weak";
     setProgress(1, `Complete: ${detectedFrames} of ${frames.length} frames contain paths (${Math.round(coverage * 100)}%, ${quality} coverage).`);
   } catch (error) {
@@ -260,18 +324,33 @@ async function processVideo() {
 
 function playbackTick(now) {
   if (state.playbackHandle === null || state.frames.length === 0) return;
-  const frameIndex = playbackFrameIndex(now - state.playbackStartedAt, state.processedFps ?? Number(elements.fpsInput.value), state.frames.length);
-  if (frameIndex === null) {
-    stopPlayback({ resetPreview: true });
+
+  const playableFrameCount = state.playbackEndFrame - state.playbackStartFrame + 1;
+  const relativeFrameIndex = playbackFrameIndex(
+    now - state.playbackStartedAt,
+    state.processedFps ?? Number(elements.fpsInput.value),
+    playableFrameCount,
+  );
+
+  if (relativeFrameIndex === null) {
+    state.playbackStartedAt = now;
+    state.lastPlaybackFrame = state.frames[state.playbackStartFrame] ?? null;
+    drawFrame(state.lastPlaybackFrame);
+    state.playbackHandle = requestAnimationFrame(playbackTick);
     return;
   }
+
+  const frameIndex = state.playbackStartFrame + relativeFrameIndex;
   const frame = state.frames[frameIndex];
   if (!frame) {
     stopPlayback({ resetPreview: true });
     return;
   }
-  drawFrame(frame);
-  elements.frameMeta.textContent = `Frame ${frameIndex + 1} / ${state.frames.length} | ${frame.pointCount} points`;
+
+  const hasPaths = frame.strokes.length > 0;
+  if (hasPaths) state.lastPlaybackFrame = frame;
+  drawFrame(hasPaths ? frame : state.lastPlaybackFrame);
+  elements.frameMeta.textContent = `Frame ${frameIndex + 1} / ${state.frames.length} | ${frame.pointCount} points${hasPaths ? "" : " | holding last detected pose"}`;
   state.playbackHandle = requestAnimationFrame(playbackTick);
 }
 
@@ -281,8 +360,13 @@ function togglePlayback() {
     return;
   }
   if (state.frames.length === 0) return;
+
+  const firstFrame = state.frames[state.playbackStartFrame];
+  state.lastPlaybackFrame = firstFrame?.strokes.length > 0 ? firstFrame : null;
   state.playbackStartedAt = performance.now();
   elements.playButton.textContent = "Stop playback";
+  drawFrame(state.lastPlaybackFrame ?? firstFrame);
+  elements.frameMeta.textContent = `Frame ${state.playbackStartFrame + 1} / ${state.frames.length}`;
   state.playbackHandle = requestAnimationFrame(playbackTick);
 }
 
@@ -290,12 +374,16 @@ async function downloadZip() {
   if (state.frames.length === 0) return;
   elements.downloadButton.disabled = true;
   setProgress(0, "Building SVG archive...");
+
   try {
     const zip = new JSZip();
     const folder = zip.folder("laser-animation");
     state.frames.forEach((frame) => {
       const fileName = `frame_${String(frame.index).padStart(4, "0")}.svg`;
-      folder.file(fileName, svgForFrame(frame.strokes, { frame: frame.index, timeSeconds: frame.timeSeconds }));
+      folder.file(fileName, svgForFrame(frame.strokes, {
+        frame: frame.index,
+        timeSeconds: frame.timeSeconds,
+      }));
     });
     folder.file("manifest.json", JSON.stringify({
       format: "laser-animation-mvp/v2",
@@ -307,7 +395,11 @@ async function downloadZip() {
       generatedAt: new Date().toISOString(),
       note: "Preview and validate these frames in LaserOS before projector use.",
     }, null, 2));
-    const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" }, (metadata) => setProgress(metadata.percent / 100, `Building archive: ${metadata.percent.toFixed(0)}%`));
+
+    const blob = await zip.generateAsync(
+      { type: "blob", compression: "DEFLATE" },
+      (metadata) => setProgress(metadata.percent / 100, `Building archive: ${metadata.percent.toFixed(0)}%`),
+    );
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -324,11 +416,16 @@ async function downloadZip() {
 }
 
 elements.videoInput.addEventListener("change", handleVideoSelection);
-elements.modeInput.addEventListener("change", () => { resetOutput(); updateModeControls(); });
+elements.modeInput.addEventListener("change", () => {
+  resetOutput();
+  updateModeControls();
+});
 elements.processButton.addEventListener("click", processVideo);
 elements.playButton.addEventListener("click", togglePlayback);
 elements.downloadButton.addEventListener("click", downloadZip);
-for (const input of [elements.fpsInput, elements.smoothingInput, elements.visibilityInput, elements.sensitivityInput]) input.addEventListener("input", updateControlLabels);
+for (const input of [elements.fpsInput, elements.smoothingInput, elements.visibilityInput, elements.sensitivityInput]) {
+  input.addEventListener("input", updateControlLabels);
+}
 elements.sourceVideo.addEventListener("loadedmetadata", updateModeControls);
 window.addEventListener("beforeunload", () => {
   if (state.videoUrl) URL.revokeObjectURL(state.videoUrl);

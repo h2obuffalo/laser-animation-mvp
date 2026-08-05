@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Convert human or air-dancer movement into scanner-friendly SVG animation frames." />
+    <meta name="description" content="Convert human, air-dancer, or foreground object movement into scanner-friendly SVG animation frames." />
     <title>Laser Animation MVP</title>
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
@@ -13,7 +13,7 @@
         <div>
           <p class="eyebrow">VIDEO TO LASER SVG</p>
           <h1>Laser Animation MVP</h1>
-          <p class="intro">Extract movement from a person or inflatable air dancer, reduce it to stable laser paths, and export numbered SVG frames for LaserOS testing.</p>
+          <p class="intro">Extract movement from a person, air dancer, or foreground object, reduce it to stable laser paths, and export numbered SVG frames for LaserOS testing.</p>
         </div>
         <div id="modelStatus" class="status" data-state="loading">Loading pose model...</div>
       </header>
@@ -22,11 +22,13 @@
         <h2 id="controls-heading">Input and processing</h2>
         <div class="control-grid">
           <label class="file-control"><span>Test video</span><input id="videoInput" type="file" accept="video/*" /></label>
-          <label><span>Tracking mode</span><select id="modeInput"><option value="person">Person pose</option><option value="air-dancer">Air dancer silhouette</option></select></label>
+          <label><span>Tracking mode</span><select id="modeInput"><option value="person">Person pose</option><option value="air-dancer">Foreground / air dancer silhouette</option></select></label>
+          <label id="representationControls" hidden><span>Representation</span><select id="representationInput"><option value="humanoid">Humanoid abstraction</option><option value="outline">Simplified subject outline</option></select></label>
           <label><span>Output frame rate <output id="fpsValue">15 fps</output></span><input id="fpsInput" type="range" min="5" max="30" step="1" value="15" /></label>
           <label><span>Smoothing <output id="smoothingValue">65%</output></span><input id="smoothingInput" type="range" min="0" max="90" step="5" value="65" /></label>
           <label id="poseControls"><span>Minimum landmark visibility <output id="visibilityValue">50%</output></span><input id="visibilityInput" type="range" min="20" max="90" step="5" value="50" /></label>
           <label id="airDancerControls" hidden><span>Silhouette sensitivity <output id="sensitivityValue">55%</output></span><input id="sensitivityInput" type="range" min="10" max="95" step="5" value="55" /></label>
+          <label id="outlineControls" hidden><span>Outline detail <output id="outlinePointsValue">32 points</output></span><input id="outlinePointsInput" type="range" min="12" max="80" step="4" value="32" /></label>
         </div>
 
         <div class="button-row">
@@ -43,7 +45,7 @@
         <article class="panel preview-panel"><div class="panel-heading"><h2>Laser path preview</h2><span id="frameMeta">No frames generated</span></div><div class="media-stage laser-stage"><canvas id="laserCanvas" width="1000" height="1000"></canvas></div></article>
       </section>
 
-      <section class="panel notes"><h2>Mode guidance</h2><p><strong>Person pose</strong> expects a real, fully visible person. <strong>Air dancer silhouette</strong> follows the largest colourful vertical object against a relatively consistent background and converts its centreline and extremities into a humanoid figure. The completion summary reports usable path coverage rather than only timestamps sampled.</p></section>
+      <section class="panel notes"><h2>Representation guidance</h2><p><strong>Humanoid abstraction</strong> reduces an air dancer to a body, arms, base, and head. <strong>Simplified subject outline</strong> follows the left and right silhouette edges to preserve more of the original shape. It can also work for a person or object that is clearly separated from a relatively consistent background. Keep the outline point count low for smoother laser scanning.</p></section>
     </main>
     <script type="module" src="./src/main.js"></script>
   </body>

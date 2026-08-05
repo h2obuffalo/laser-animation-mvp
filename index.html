@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Convert a single-person video into scanner-friendly SVG animation frames for laser projection."
+    />
+    <title>Laser Animation MVP</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">VIDEO TO LASER SVG</p>
+          <h1>Laser Animation MVP</h1>
+          <p class="intro">
+            Track a person in a local video, reduce the motion to stable laser paths,
+            and export numbered SVG frames for LaserOS testing.
+          </p>
+        </div>
+        <div id="modelStatus" class="status" data-state="loading">Loading pose model...</div>
+      </header>
+
+      <section class="panel controls" aria-labelledby="controls-heading">
+        <h2 id="controls-heading">Input and processing</h2>
+        <div class="control-grid">
+          <label class="file-control">
+            <span>Test video</span>
+            <input id="videoInput" type="file" accept="video/*" />
+          </label>
+
+          <label>
+            <span>Output frame rate <output id="fpsValue">15 fps</output></span>
+            <input id="fpsInput" type="range" min="5" max="30" step="1" value="15" />
+          </label>
+
+          <label>
+            <span>Smoothing <output id="smoothingValue">65%</output></span>
+            <input id="smoothingInput" type="range" min="0" max="90" step="5" value="65" />
+          </label>
+
+          <label>
+            <span>Minimum landmark visibility <output id="visibilityValue">50%</output></span>
+            <input id="visibilityInput" type="range" min="20" max="90" step="5" value="50" />
+          </label>
+        </div>
+
+        <div class="button-row">
+          <button id="processButton" type="button" disabled>Process video</button>
+          <button id="playButton" type="button" class="secondary" disabled>Play result</button>
+          <button id="downloadButton" type="button" class="secondary" disabled>Download SVG ZIP</button>
+        </div>
+
+        <div class="progress-wrap" aria-live="polite">
+          <progress id="progressBar" max="1" value="0"></progress>
+          <span id="progressText">Choose a short, single-person video to begin.</span>
+        </div>
+      </section>
+
+      <section class="preview-grid" aria-label="Video and laser previews">
+        <article class="panel preview-panel">
+          <div class="panel-heading">
+            <h2>Source video</h2>
+            <span id="videoMeta">No video loaded</span>
+          </div>
+          <div class="media-stage">
+            <video id="sourceVideo" controls playsinline muted></video>
+          </div>
+        </article>
+
+        <article class="panel preview-panel">
+          <div class="panel-heading">
+            <h2>Laser path preview</h2>
+            <span id="frameMeta">No frames generated</span>
+          </div>
+          <div class="media-stage laser-stage">
+            <canvas id="laserCanvas" width="1000" height="1000"></canvas>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel notes">
+        <h2>MVP limits</h2>
+        <p>
+          Use a short clip with one fully visible person, a fixed camera, and clear separation
+          from the background. The exporter produces simple white paths on a 1000 x 1000 viewBox.
+          It does not send data directly to a projector.
+        </p>
+      </section>
+    </main>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

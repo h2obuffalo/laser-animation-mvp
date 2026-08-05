@@ -134,6 +134,17 @@ function largestVerticalComponent(mask, width, height) {
   return best;
 }
 
+function trackedComponent(imageData, sensitivity) {
+  const { width, height } = imageData;
+  const mask = dilate(buildMask(imageData, sensitivity), width, height);
+  const component = largestVerticalComponent(mask, width, height);
+  if (!component) return null;
+
+  const componentMask = new Uint8Array(mask.length);
+  for (const index of component.pixels) componentMask[index] = 1;
+  return { component, componentMask, width, height };
+}
+
 function xAtBand(componentMask, width, height, targetY, radius) {
   let weightedX = 0;
   let count = 0;
@@ -147,6 +158,23 @@ function xAtBand(componentMask, width, height, targetY, radius) {
     }
   }
   return count ? weightedX / count : null;
+}
+
+function extentAtBand(componentMask, width, height, targetY, radius) {
+  let minimumX = width;
+  let maximumX = -1;
+  const startY = Math.max(0, Math.floor(targetY - radius));
+  const endY = Math.min(height - 1, Math.ceil(targetY + radius));
+
+  for (let y = startY; y <= endY; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (!componentMask[y * width + x]) continue;
+      minimumX = Math.min(minimumX, x);
+      maximumX = Math.max(maximumX, x);
+    }
+  }
+
+  return maximumX >= 0 ? { minimumX, maximumX } : null;
 }
 
 function centrelineAtY(centres, y) {
@@ -183,16 +211,17 @@ function toViewBox(point, width, height, visibility = 1) {
   }, width, height);
 }
 
+function componentConfidence(component, width, height) {
+  return clamp(component.area / Math.max(1, width * height * 0.08), 0.25, 1);
+}
+
 export function extractAirDancerLandmarks(imageData, options = {}) {
   if (!imageData || !imageData.data || imageData.width <= 0 || imageData.height <= 0) return null;
   const sensitivity = clamp(options.sensitivity ?? 0.55, 0, 1);
-  const { width, height } = imageData;
-  const mask = dilate(buildMask(imageData, sensitivity), width, height);
-  const component = largestVerticalComponent(mask, width, height);
-  if (!component) return null;
+  const tracked = trackedComponent(imageData, sensitivity);
+  if (!tracked) return null;
 
-  const componentMask = new Uint8Array(mask.length);
-  for (const index of component.pixels) componentMask[index] = 1;
+  const { component, componentMask, width, height } = tracked;
   const fractions = [0.03, 0.16, 0.3, 0.5, 0.7, 0.92];
   const radius = Math.max(1, Math.round(component.verticalSpan * 0.035));
   const centres = fractions.map((fraction) => {
@@ -209,11 +238,7 @@ export function extractAirDancerLandmarks(imageData, options = {}) {
   const rightHand = right && right.distance >= minimumArmReach ? right : shoulder;
   const baseHalfWidth = Math.max(2, component.horizontalSpan * 0.12);
   const base = centres[5];
-  const confidence = clamp(
-    component.area / Math.max(1, width * height * 0.08),
-    0.25,
-    1,
-  );
+  const confidence = componentConfidence(component, width, height);
 
   const points = [
     centres[0],
@@ -229,6 +254,48 @@ export function extractAirDancerLandmarks(imageData, options = {}) {
   ];
 
   return points.map((point) => toViewBox(point, width, height, confidence));
+}
+
+export function extractForegroundOutline(imageData, options = {}) {
+  if (!imageData || !imageData.data || imageData.width <= 0 || imageData.height <= 0) return null;
+  const sensitivity = clamp(options.sensitivity ?? 0.55, 0, 1);
+  const requestedPoints = Math.round(clamp(options.pointCount ?? 32, 12, 80));
+  const uniquePoints = requestedPoints - 1;
+  const leftSamples = Math.max(6, Math.ceil(uniquePoints / 2));
+  const rightSamples = Math.max(5, Math.floor(uniquePoints / 2));
+  const tracked = trackedComponent(imageData, sensitivity);
+  if (!tracked) return null;
+
+  const { component, componentMask, width, height } = tracked;
+  const confidence = componentConfidence(component, width, height);
+  const radius = Math.max(1, Math.round(component.verticalSpan / Math.max(12, leftSamples * 2.5)));
+  const left = [];
+  const right = [];
+  let previousExtent = {
+    minimumX: component.minX,
+    maximumX: component.maxX,
+  };
+
+  for (let index = 0; index < leftSamples; index += 1) {
+    const fraction = leftSamples === 1 ? 0 : index / (leftSamples - 1);
+    const y = component.minY + component.verticalSpan * fraction;
+    const extent = extentAtBand(componentMask, width, height, y, radius) ?? previousExtent;
+    previousExtent = extent;
+    left.push(toViewBox({ x: extent.minimumX, y }, width, height, confidence));
+  }
+
+  previousExtent = { minimumX: component.minX, maximumX: component.maxX };
+  for (let index = 0; index < rightSamples; index += 1) {
+    const fraction = rightSamples === 1 ? 0 : index / (rightSamples - 1);
+    const y = component.minY + component.verticalSpan * fraction;
+    const extent = extentAtBand(componentMask, width, height, y, radius) ?? previousExtent;
+    previousExtent = extent;
+    right.push(toViewBox({ x: extent.maximumX, y }, width, height, confidence));
+  }
+
+  const outline = [...left, ...right.reverse()];
+  outline.push({ ...outline[0] });
+  return outline;
 }
 
 export function airDancerLandmarksToStrokes(landmarks) {

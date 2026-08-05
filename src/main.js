@@ -1,7 +1,19 @@
 import { FilesetResolver, PoseLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/+esm";
 import JSZip from "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm";
-import { airDancerLandmarksToStrokes, extractAirDancerLandmarks } from "./air-dancer.js";
-import { VIEWBOX_SIZE, countPoints, landmarksToStrokes, mapLandmarkToViewBox, playbackFrameIndex, smoothLandmarks, svgForFrame } from "./laser.js";
+import {
+  airDancerLandmarksToStrokes,
+  extractAirDancerLandmarks,
+  extractForegroundOutline,
+} from "./air-dancer.js";
+import {
+  VIEWBOX_SIZE,
+  countPoints,
+  landmarksToStrokes,
+  mapLandmarkToViewBox,
+  playbackFrameIndex,
+  smoothLandmarks,
+  svgForFrame,
+} from "./laser.js";
 
 const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
 const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm";
@@ -10,7 +22,8 @@ const AIR_DANCER_ANALYSIS_WIDTH = 240;
 
 const elements = Object.fromEntries([
   "modelStatus", "videoInput", "sourceVideo", "processButton", "playButton", "downloadButton",
-  "modeInput", "fpsInput", "fpsValue", "smoothingInput", "smoothingValue", "visibilityInput",
+  "modeInput", "representationInput", "representationControls", "outlineControls", "outlinePointsInput",
+  "outlinePointsValue", "fpsInput", "fpsValue", "smoothingInput", "smoothingValue", "visibilityInput",
   "visibilityValue", "sensitivityInput", "sensitivityValue", "poseControls", "airDancerControls",
   "progressBar", "progressText", "videoMeta", "frameMeta", "laserCanvas",
 ].map((id) => [id, document.querySelector(`#${id}`)]));
@@ -30,6 +43,7 @@ const state = {
   lastPlaybackFrame: null,
   processedFps: null,
   processedMode: null,
+  processedRepresentation: null,
 };
 
 function setStatus(text, type = "ready") {
@@ -92,6 +106,7 @@ function resetOutput() {
   state.frames = [];
   state.processedFps = null;
   state.processedMode = null;
+  state.processedRepresentation = null;
   state.playbackStartFrame = 0;
   state.playbackEndFrame = 0;
   state.lastPlaybackFrame = null;
@@ -107,16 +122,21 @@ function updateControlLabels() {
   elements.smoothingValue.value = `${elements.smoothingInput.value}%`;
   elements.visibilityValue.value = `${elements.visibilityInput.value}%`;
   elements.sensitivityValue.value = `${elements.sensitivityInput.value}%`;
+  elements.outlinePointsValue.value = `${elements.outlinePointsInput.value} points`;
 }
 
 function updateModeControls() {
-  const airDancerMode = elements.modeInput.value === "air-dancer";
-  elements.poseControls.hidden = airDancerMode;
-  elements.airDancerControls.hidden = !airDancerMode;
-  const canProcess = airDancerMode || Boolean(state.poseLandmarker);
+  const foregroundMode = elements.modeInput.value === "air-dancer";
+  const outlineMode = foregroundMode && elements.representationInput.value === "outline";
+  elements.poseControls.hidden = foregroundMode;
+  elements.airDancerControls.hidden = !foregroundMode;
+  elements.representationControls.hidden = !foregroundMode;
+  elements.outlineControls.hidden = !outlineMode;
+
+  const canProcess = foregroundMode || Boolean(state.poseLandmarker);
   const videoReady = elements.sourceVideo.readyState >= HTMLMediaElement.HAVE_METADATA;
   elements.processButton.disabled = !canProcess || !videoReady || state.processing;
-  if (airDancerMode) setStatus("Air dancer mode ready");
+  if (foregroundMode) setStatus("Foreground silhouette mode ready");
   else if (state.poseLandmarker) setStatus("Pose model ready");
   else setStatus("Loading pose model...", "loading");
 }
@@ -186,7 +206,7 @@ async function initialiseModel() {
       console.error(cpuError);
       if (elements.modeInput.value === "person") {
         setStatus("Pose model failed to load", "error");
-        setProgress(0, "Air dancer mode remains available.");
+        setProgress(0, "Foreground silhouette mode remains available.");
       }
     }
   }
@@ -219,15 +239,26 @@ function mappedPose(result, video) {
     : null;
 }
 
-function airDancerPose(video) {
+function foregroundImageData(video) {
   const aspect = video.videoWidth / video.videoHeight;
   analysisCanvas.width = AIR_DANCER_ANALYSIS_WIDTH;
   analysisCanvas.height = Math.max(80, Math.round(AIR_DANCER_ANALYSIS_WIDTH / aspect));
   analysisContext.drawImage(video, 0, 0, analysisCanvas.width, analysisCanvas.height);
-  const imageData = analysisContext.getImageData(0, 0, analysisCanvas.width, analysisCanvas.height);
-  return extractAirDancerLandmarks(imageData, {
+  return analysisContext.getImageData(0, 0, analysisCanvas.width, analysisCanvas.height);
+}
+
+function foregroundShape(video, representation) {
+  const imageData = foregroundImageData(video);
+  const options = {
     sensitivity: Number(elements.sensitivityInput.value) / 100,
-  });
+  };
+  if (representation === "outline") {
+    return extractForegroundOutline(imageData, {
+      ...options,
+      pointCount: Number(elements.outlinePointsInput.value),
+    });
+  }
+  return extractAirDancerLandmarks(imageData, options);
 }
 
 function setPlaybackRange(frames) {
@@ -246,6 +277,7 @@ function setPlaybackRange(frames) {
 async function processVideo() {
   if (state.processing) return;
   const mode = elements.modeInput.value;
+  const representation = mode === "air-dancer" ? elements.representationInput.value : "pose";
   if (mode === "person" && !state.poseLandmarker) return;
 
   const video = elements.sourceVideo;
@@ -256,13 +288,14 @@ async function processVideo() {
   const frameCount = Math.max(1, Math.floor(duration * fps));
   const originalTime = video.currentTime;
   const frames = [];
-  let previousLandmarks = null;
+  let previousShape = null;
 
   state.processing = true;
   resetOutput();
   updateModeControls();
   elements.videoInput.disabled = true;
   elements.modeInput.disabled = true;
+  elements.representationInput.disabled = true;
 
   try {
     video.pause();
@@ -270,21 +303,25 @@ async function processVideo() {
       const timeSeconds = index / fps;
       await seekVideo(timeSeconds);
 
-      let currentLandmarks = null;
+      let currentShape = null;
       if (mode === "person") {
         const result = state.poseLandmarker.detectForVideo(video, timeSeconds * 1000);
-        currentLandmarks = mappedPose(result, video);
+        currentShape = mappedPose(result, video);
       } else {
-        currentLandmarks = airDancerPose(video);
+        currentShape = foregroundShape(video, representation);
       }
 
       let strokes = [];
-      if (currentLandmarks) {
-        const smoothed = smoothLandmarks(previousLandmarks, currentLandmarks, smoothing);
-        previousLandmarks = smoothed;
-        strokes = mode === "person"
-          ? landmarksToStrokes(smoothed, minimumVisibility)
-          : airDancerLandmarksToStrokes(smoothed);
+      if (currentShape) {
+        const smoothed = smoothLandmarks(previousShape, currentShape, smoothing);
+        previousShape = smoothed;
+        if (mode === "person") {
+          strokes = landmarksToStrokes(smoothed, minimumVisibility);
+        } else if (representation === "outline") {
+          strokes = [[...smoothed.map(({ x, y }) => ({ x, y }))]];
+        } else {
+          strokes = airDancerLandmarksToStrokes(smoothed);
+        }
       }
 
       frames.push({ index, timeSeconds, strokes, pointCount: countPoints(strokes) });
@@ -298,6 +335,7 @@ async function processVideo() {
     state.frames = frames;
     state.processedFps = fps;
     state.processedMode = mode;
+    state.processedRepresentation = representation;
     setPlaybackRange(frames);
 
     const detectedFrames = frames.filter((frame) => frame.strokes.length > 0).length;
@@ -317,6 +355,7 @@ async function processVideo() {
     state.processing = false;
     elements.videoInput.disabled = false;
     elements.modeInput.disabled = false;
+    elements.representationInput.disabled = false;
     updateModeControls();
     await seekVideo(Math.min(originalTime, video.duration));
   }
@@ -386,8 +425,9 @@ async function downloadZip() {
       }));
     });
     folder.file("manifest.json", JSON.stringify({
-      format: "laser-animation-mvp/v2",
+      format: "laser-animation-mvp/v3",
       mode: state.processedMode,
+      representation: state.processedRepresentation,
       frameRate: state.processedFps,
       frameCount: state.frames.length,
       usableFrameCount: state.frames.filter((frame) => frame.strokes.length > 0).length,
@@ -420,10 +460,20 @@ elements.modeInput.addEventListener("change", () => {
   resetOutput();
   updateModeControls();
 });
+elements.representationInput.addEventListener("change", () => {
+  resetOutput();
+  updateModeControls();
+});
 elements.processButton.addEventListener("click", processVideo);
 elements.playButton.addEventListener("click", togglePlayback);
 elements.downloadButton.addEventListener("click", downloadZip);
-for (const input of [elements.fpsInput, elements.smoothingInput, elements.visibilityInput, elements.sensitivityInput]) {
+for (const input of [
+  elements.fpsInput,
+  elements.smoothingInput,
+  elements.visibilityInput,
+  elements.sensitivityInput,
+  elements.outlinePointsInput,
+]) {
   input.addEventListener("input", updateControlLabels);
 }
 elements.sourceVideo.addEventListener("loadedmetadata", updateModeControls);

@@ -1,83 +1,57 @@
-# Laser Animation MVP
+# Laser Animation MVP v3
 
-A browser app that converts movement from a person, air dancer, or foreground object into simplified SVG frame sequences intended for LaserOS experimentation.
+Browser-based air-dancer motion capture and retargeting for conservative LaserOS SVG experiments.
 
-The source video stays in the browser. The app can use MediaPipe Pose Landmarker for a real person, or foreground colour/background separation for an air dancer or other prominent subject. It applies temporal smoothing, previews laser paths, and exports numbered SVG files in a ZIP archive.
-
-## Run it
-
-No install or build step is required.
+## Run
 
 ```bash
 python3 -m http.server 8000
 ```
 
-Open `http://localhost:8000` in a current Chrome, Edge, Firefox, or Safari browser. An internet connection is required while the app loads the MediaPipe WebAssembly files, pose model, and JSZip module from their CDNs.
+Open `http://localhost:8000`, load a local video, seek to a clear frame, drag a box around the intended air dancer, confirm the mask, then process and export.
 
-## Tracking and representation modes
+The browser imports JSZip from a CDN. Video remains local.
 
-### Person pose
+## v3 pipeline
 
-Uses MediaPipe human landmarks and exports a low-point skeleton. Use a fully visible person with deliberate movement.
+```text
+video -> user-selected ROI -> bounded colour mask tracking -> reusable motion rig -> Magic air dancer puppet -> RGB SVG frames
+```
 
-### Foreground / air dancer silhouette
+The implementation uses a clearly labelled local ROI colour-model fallback, not SAM 2. It follows the previous box, reports missing/border-touch masks, and avoids selecting the largest component across the full frame.
 
-Finds the largest colourful foreground subject against the estimated border/background colour. It offers two representations:
-
-- **Humanoid abstraction:** centreline, arms, base, and head.
-- **Simplified subject outline:** a closed silhouette envelope that follows the subject's changing left and right edges.
-
-The outline detail control limits each frame to 12-80 points. Start around 24-32 points for LaserCube testing and increase only when the added shape detail is useful.
-
-This foreground mode can also work with a person or object when the camera is fixed and the subject is clearly separated from a relatively consistent background.
-
-## Suggested test footage
-
-Use a short clip with:
-
-- one prominent subject;
-- a fixed camera;
-- clear lighting and background separation;
-- deliberate, readable movement;
-- no rapid cuts.
-
-The MVP processes up to the first 30 seconds. Ten seconds is a useful first test.
+SAM 2.1 was researched but not added because its official implementation requires Python 3.10+, PyTorch 2.5.1+, checkpoints, and normally a CUDA-capable local setup. The official video predictor supports box/point prompting followed by propagation, so it remains a suitable future optional backend rather than a hidden dependency.
 
 ## Output
 
-The downloaded archive contains:
-
 ```text
 laser-animation/
-  frame_0000.svg
-  frame_0001.svg
-  ...
+  frames/frame_0000.svg
+  frames/frame_0001.svg
+  motion.json
+  model.json
   manifest.json
 ```
 
-Each frame uses a `0 0 1000 1000` viewBox, white strokes, rounded joins, no fill, and a transparent background. The manifest records the tracking mode and selected representation.
+`motion.json` is independent of rendering. The built-in model uses stable semantic joints, stable path ordering, two body edges, outlined arms, head/face, base, one flow line, coherent RGB palettes, and short deterministic head/hand trails.
 
-## Checks
+## Laser constraints
+
+Exports use a transparent background, no fills, no gradients, no JavaScript, rounded joins, and solid per-path RGB strokes. Preview opacity is not exported. Trails are removed first when the configured SVG point budget is exceeded, followed by decorative paths; body and arms are preserved last.
+
+No current official LaserOS source located during this implementation provided a dependable numeric SVG control-point limit or a guarantee for opacity/gradient handling. The app therefore records this uncertainty in `manifest.json`, treats SVG vertices as different from scanner points, defaults to a conservative 240-vertex budget, and warns that interpolation, corner dwell, blanking, and colour changes can add scanner points. Validate every export in LaserOS at safe power before projection.
+
+## Local checks
 
 ```bash
 npm run check
 npm test
 ```
 
-The app itself has no npm dependencies. Node is used only for syntax checks and tests of the path-generation functions.
+## Known limitations
 
-## Scope and safety
-
-This is an offline authoring prototype. It does not connect to LaserCube hardware or emit real-time laser commands. Inspect imported frames in LaserOS and validate scan quality before using a projector.
-
-LaserCube devices are Class 4 lasers. Use a controlled terminated projection area, prevent direct or reflected audience exposure, and follow the projector and LaserOS safety guidance.
-
-## Deliberate non-goals
-
-- direct projector control;
-- multi-person tracking;
-- semantic object recognition;
-- optical-flow trails;
-- colour animation;
-- scanner timing or blanking simulation;
-- arbitrary long-form video processing.
+- Colour tracking works best with a distinct, evenly lit subject and fixed camera.
+- Occlusion, severe colour changes, and a similarly coloured background can lose the mask.
+- Arm extraction is deliberately approximate and tube-specific.
+- The legacy person-pose implementation remains in the parent branch; the v3 UI labels it but does not process it.
+- No direct LaserCube control, streaming, cloud upload, manual mask painting, or multi-object tracking.

@@ -1,8 +1,8 @@
 # Laser Animation MVP
 
-A small browser app that converts a single-person video into a simplified SVG frame sequence intended for LaserOS experimentation.
+A browser app that converts movement from a person, air dancer, or foreground object into simplified SVG frame sequences intended for LaserOS experimentation.
 
-The MVP keeps the source video in the browser. It uses MediaPipe Pose Landmarker to track a body, applies temporal smoothing, turns selected landmarks into a small set of continuous laser paths, previews the result, and exports numbered SVG files in a ZIP archive.
+The source video stays in the browser. The app can use MediaPipe Pose Landmarker for a real person, or foreground colour/background separation for an air dancer or other prominent subject. It applies temporal smoothing, previews laser paths, and exports numbered SVG files in a ZIP archive.
 
 ## Run it
 
@@ -14,12 +14,28 @@ python3 -m http.server 8000
 
 Open `http://localhost:8000` in a current Chrome, Edge, Firefox, or Safari browser. An internet connection is required while the app loads the MediaPipe WebAssembly files, pose model, and JSZip module from their CDNs.
 
+## Tracking and representation modes
+
+### Person pose
+
+Uses MediaPipe human landmarks and exports a low-point skeleton. Use a fully visible person with deliberate movement.
+
+### Foreground / air dancer silhouette
+
+Finds the largest colourful foreground subject against the estimated border/background colour. It offers two representations:
+
+- **Humanoid abstraction:** centreline, arms, base, and head.
+- **Simplified subject outline:** a closed silhouette envelope that follows the subject's changing left and right edges.
+
+The outline detail control limits each frame to 12-80 points. Start around 24-32 points for LaserCube testing and increase only when the added shape detail is useful.
+
+This foreground mode can also work with a person or object when the camera is fixed and the subject is clearly separated from a relatively consistent background.
+
 ## Suggested test footage
 
 Use a short clip with:
 
-- one person;
-- the full body visible;
+- one prominent subject;
 - a fixed camera;
 - clear lighting and background separation;
 - deliberate, readable movement;
@@ -39,7 +55,7 @@ laser-animation/
   manifest.json
 ```
 
-Each frame uses a `0 0 1000 1000` viewBox, white strokes, rounded joins, and no fills. The current body renderer normally stays well below 30 source points per frame before any scanner interpolation performed by LaserOS.
+Each frame uses a `0 0 1000 1000` viewBox, white strokes, rounded joins, no fill, and a transparent background. The manifest records the tracking mode and selected representation.
 
 ## Checks
 
@@ -60,7 +76,7 @@ LaserCube devices are Class 4 lasers. Use a controlled terminated projection are
 
 - direct projector control;
 - multi-person tracking;
-- automatic silhouette tracing;
+- semantic object recognition;
 - optical-flow trails;
 - colour animation;
 - scanner timing or blanking simulation;

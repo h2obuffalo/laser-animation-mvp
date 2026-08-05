@@ -1,0 +1,13 @@
+{
+  "name": "laser-animation-mvp",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/main.js && node --check src/laser.js && node --check src/air-dancer.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

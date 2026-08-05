@@ -1,0 +1,64 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #07090c;
+  color: #edf3f0;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: radial-gradient(circle at top left, rgba(74, 255, 156, 0.09), transparent 34rem), #07090c;
+}
+button, input { font: inherit; }
+.shell { width: min(1320px, calc(100% - 32px)); margin: 0 auto; padding: 44px 0 64px; }
+.hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 32px; margin-bottom: 24px; }
+.eyebrow { margin: 0 0 10px; color: #70f8aa; font-size: .75rem; font-weight: 800; letter-spacing: .18em; }
+h1, h2, p { margin-top: 0; }
+h1 { margin-bottom: 12px; font-size: clamp(2.1rem, 5vw, 4.6rem); line-height: .98; letter-spacing: -.055em; }
+h2 { margin-bottom: 18px; font-size: 1rem; letter-spacing: .02em; }
+.intro { max-width: 760px; margin-bottom: 0; color: #aab6b0; font-size: 1.05rem; line-height: 1.65; }
+.status { flex: 0 0 auto; border: 1px solid #214332; border-radius: 999px; padding: 9px 13px; background: #0d1812; color: #8cf5b8; font-size: .82rem; }
+.status[data-state="loading"] { border-color: #514b2d; background: #19170d; color: #f1d978; }
+.status[data-state="error"] { border-color: #5e2929; background: #1e1010; color: #ff9a9a; }
+.panel { border: 1px solid #20272b; border-radius: 18px; background: rgba(14, 18, 21, .93); box-shadow: 0 18px 60px rgba(0,0,0,.2); }
+.controls { padding: 24px; margin-bottom: 20px; }
+.control-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
+label { display: grid; gap: 9px; color: #c9d1cd; font-size: .88rem; }
+label output { float: right; color: #70f8aa; }
+input[type="file"] { width: 100%; color: #aab4af; }
+input[type="file"]::file-selector-button { margin-right: 10px; border: 1px solid #33413a; border-radius: 8px; padding: 8px 10px; background: #18221d; color: #e9f3ee; cursor: pointer; }
+input[type="range"] { width: 100%; accent-color: #64ef9f; }
+.button-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+button { border: 1px solid #5effa3; border-radius: 10px; padding: 10px 16px; background: #5effa3; color: #07110b; font-weight: 750; cursor: pointer; }
+button.secondary { border-color: #35413b; background: #171d1a; color: #dce5e0; }
+button:disabled { cursor: not-allowed; opacity: .42; }
+.progress-wrap { display: grid; grid-template-columns: minmax(140px, 320px) 1fr; align-items: center; gap: 14px; margin-top: 18px; color: #8f9a95; font-size: .84rem; }
+progress { width: 100%; height: 8px; border: 0; border-radius: 999px; overflow: hidden; background: #202725; }
+progress::-webkit-progress-bar { background: #202725; }
+progress::-webkit-progress-value { background: #62f5a1; }
+progress::-moz-progress-bar { background: #62f5a1; }
+.preview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.preview-panel { min-width: 0; padding: 18px; }
+.panel-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 14px; }
+.panel-heading h2 { margin-bottom: 0; }
+.panel-heading span { color: #78847e; font-size: .78rem; }
+.media-stage { display: grid; place-items: center; min-height: 380px; overflow: hidden; border: 1px solid #1a2023; border-radius: 12px; background: #030506; }
+video, canvas { display: block; width: 100%; max-height: 620px; object-fit: contain; }
+.laser-stage { background: linear-gradient(rgba(91,255,160,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(91,255,160,.035) 1px, transparent 1px), #020406; background-size: 50px 50px; }
+.notes { margin-top: 20px; padding: 22px 24px; }
+.notes h2 { margin-bottom: 8px; }
+.notes p { margin-bottom: 0; max-width: 940px; color: #929e98; line-height: 1.6; }
+@media (max-width: 980px) {
+  .control-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .preview-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .shell { width: min(100% - 20px, 1320px); padding-top: 24px; }
+  .hero { flex-direction: column; gap: 18px; }
+  .control-grid, .progress-wrap { grid-template-columns: 1fr; }
+  .media-stage { min-height: 260px; }
+}

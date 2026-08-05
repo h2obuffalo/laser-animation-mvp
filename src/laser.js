@@ -58,9 +58,7 @@ export function clamp(value, minimum, maximum) {
 }
 
 export function mapLandmarkToViewBox(landmark, videoWidth, videoHeight) {
-  if (!landmark || videoWidth <= 0 || videoHeight <= 0) {
-    return null;
-  }
+  if (!landmark || videoWidth <= 0 || videoHeight <= 0) return null;
 
   const aspect = videoWidth / videoHeight;
   let width = VIEWBOX_SIZE;
@@ -85,19 +83,12 @@ export function mapLandmarkToViewBox(landmark, videoWidth, videoHeight) {
 
 export function smoothLandmarks(previous, current, smoothing) {
   const amount = clamp(smoothing, 0, 0.95);
-  if (!previous) {
-    return current.map((point) => (point ? { ...point } : null));
-  }
+  if (!previous) return current.map((point) => (point ? { ...point } : null));
 
   return current.map((point, index) => {
     const oldPoint = previous[index];
-    if (!point) {
-      return oldPoint ? { ...oldPoint } : null;
-    }
-    if (!oldPoint) {
-      return { ...point };
-    }
-
+    if (!point) return oldPoint ? { ...oldPoint } : null;
+    if (!oldPoint) return { ...point };
     return {
       x: oldPoint.x * amount + point.x * (1 - amount),
       y: oldPoint.y * amount + point.y * (1 - amount),
@@ -109,39 +100,32 @@ export function smoothLandmarks(previous, current, smoothing) {
 function splitVisibleChain(chain, landmarks, minimumVisibility) {
   const segments = [];
   let currentSegment = [];
-
   for (const index of chain) {
     const point = landmarks[index];
     if (point && point.visibility >= minimumVisibility) {
       currentSegment.push({ x: point.x, y: point.y });
       continue;
     }
-
-    if (currentSegment.length >= 2) {
-      segments.push(currentSegment);
-    }
+    if (currentSegment.length >= 2) segments.push(currentSegment);
     currentSegment = [];
   }
-
-  if (currentSegment.length >= 2) {
-    segments.push(currentSegment);
-  }
-
+  if (currentSegment.length >= 2) segments.push(currentSegment);
   return segments;
 }
 
 export function landmarksToStrokes(landmarks, minimumVisibility = 0.5) {
-  if (!Array.isArray(landmarks) || landmarks.length === 0) {
-    return [];
-  }
-
-  return LASER_CHAINS.flatMap((chain) =>
-    splitVisibleChain(chain, landmarks, minimumVisibility),
-  );
+  if (!Array.isArray(landmarks) || landmarks.length === 0) return [];
+  return LASER_CHAINS.flatMap((chain) => splitVisibleChain(chain, landmarks, minimumVisibility));
 }
 
 export function countPoints(strokes) {
   return strokes.reduce((total, stroke) => total + stroke.length, 0);
+}
+
+export function playbackFrameIndex(elapsedMilliseconds, framesPerSecond, frameCount) {
+  if (!Number.isFinite(elapsedMilliseconds) || elapsedMilliseconds < 0 || !Number.isFinite(framesPerSecond) || framesPerSecond <= 0 || !Number.isInteger(frameCount) || frameCount <= 0) return null;
+  const index = Math.floor((elapsedMilliseconds / 1000) * framesPerSecond);
+  return index >= frameCount ? null : index;
 }
 
 function roundCoordinate(value) {
@@ -152,16 +136,12 @@ export function svgForFrame(strokes, metadata = {}) {
   const polylines = strokes
     .filter((stroke) => stroke.length >= 2)
     .map((stroke) => {
-      const points = stroke
-        .map((point) => `${roundCoordinate(point.x)},${roundCoordinate(point.y)}`)
-        .join(" ");
+      const points = stroke.map((point) => `${roundCoordinate(point.x)},${roundCoordinate(point.y)}`).join(" ");
       return `  <polyline points="${points}" />`;
     })
     .join("\n");
-
   const frame = Number.isFinite(metadata.frame) ? metadata.frame : 0;
   const timeSeconds = Number.isFinite(metadata.timeSeconds) ? metadata.timeSeconds : 0;
-
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VIEWBOX_SIZE} ${VIEWBOX_SIZE}" width="${VIEWBOX_SIZE}" height="${VIEWBOX_SIZE}" data-frame="${frame}" data-time="${timeSeconds.toFixed(3)}">`,

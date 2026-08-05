@@ -1,7 +1,45 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { airDancerLandmarksToStrokes, extractAirDancerLandmarks } from "../src/air-dancer.js";
-import { countPoints, landmarksToStrokes, mapLandmarkToViewBox, playbackFrameIndex, smoothLandmarks, svgForFrame } from "../src/laser.js";
+import {
+  airDancerLandmarksToStrokes,
+  extractAirDancerLandmarks,
+  extractForegroundOutline,
+} from "../src/air-dancer.js";
+import {
+  countPoints,
+  landmarksToStrokes,
+  mapLandmarkToViewBox,
+  playbackFrameIndex,
+  smoothLandmarks,
+  svgForFrame,
+} from "../src/laser.js";
+
+function syntheticAirDancer() {
+  const width = 80;
+  const height = 120;
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let index = 0; index < width * height; index += 1) {
+    data[index * 4] = 20;
+    data[index * 4 + 1] = 20;
+    data[index * 4 + 2] = 20;
+    data[index * 4 + 3] = 255;
+  }
+  const paint = (x, y) => {
+    const offset = (y * width + x) * 4;
+    data[offset] = 240;
+    data[offset + 1] = 35;
+    data[offset + 2] = 25;
+  };
+  for (let y = 12; y < 110; y += 1) {
+    const centre = 40 + Math.round(Math.sin(y / 13) * 4);
+    for (let x = centre - 5; x <= centre + 5; x += 1) paint(x, y);
+  }
+  for (let x = 16; x <= 64; x += 1) {
+    const y = 42 + Math.round(Math.abs(x - 40) * 0.18);
+    for (let yy = y - 2; yy <= y + 2; yy += 1) paint(x, yy);
+  }
+  return { data, width, height };
+}
 
 test("maps a landscape video into a centred square viewBox", () => {
   const topLeft = mapLandmarkToViewBox({ x: 0, y: 0, visibility: 1 }, 1920, 1080);
@@ -44,32 +82,21 @@ test("playback index stops exactly at the frame boundary", () => {
 });
 
 test("extracts a humanoid air-dancer figure from a coloured silhouette", () => {
-  const width = 80;
-  const height = 120;
-  const data = new Uint8ClampedArray(width * height * 4);
-  for (let index = 0; index < width * height; index += 1) {
-    data[index * 4] = 20;
-    data[index * 4 + 1] = 20;
-    data[index * 4 + 2] = 20;
-    data[index * 4 + 3] = 255;
-  }
-  const paint = (x, y) => {
-    const offset = (y * width + x) * 4;
-    data[offset] = 240;
-    data[offset + 1] = 35;
-    data[offset + 2] = 25;
-  };
-  for (let y = 12; y < 110; y += 1) {
-    const centre = 40 + Math.round(Math.sin(y / 13) * 4);
-    for (let x = centre - 5; x <= centre + 5; x += 1) paint(x, y);
-  }
-  for (let x = 16; x <= 64; x += 1) {
-    const y = 42 + Math.round(Math.abs(x - 40) * 0.18);
-    for (let yy = y - 2; yy <= y + 2; yy += 1) paint(x, yy);
-  }
-  const landmarks = extractAirDancerLandmarks({ data, width, height }, { sensitivity: 0.55 });
+  const landmarks = extractAirDancerLandmarks(syntheticAirDancer(), { sensitivity: 0.55 });
   assert.equal(landmarks.length, 10);
   const strokes = airDancerLandmarksToStrokes(landmarks);
   assert.equal(strokes.length, 4);
   assert.ok(countPoints(strokes) >= 17);
+});
+
+test("extracts a closed, point-limited outline from the tracked silhouette", () => {
+  const outline = extractForegroundOutline(syntheticAirDancer(), {
+    sensitivity: 0.55,
+    pointCount: 32,
+  });
+  assert.equal(outline.length, 32);
+  assert.deepEqual(outline[0], outline.at(-1));
+  assert.ok(Math.min(...outline.map((point) => point.x)) < 350);
+  assert.ok(Math.max(...outline.map((point) => point.x)) > 650);
+  assert.equal(countPoints([outline]), 32);
 });
